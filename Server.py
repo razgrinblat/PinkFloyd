@@ -1,27 +1,55 @@
 import socket
 import threading
-import Data
+from Data import Album
+from Config_reader import read_config
+from Packet import PDU
+
+config = read_config('Config.ini')
+HOST = config['Server']['HOST']
+PORT = int(config['Server']['PORT'])
 
 DATABASE_FILE = "Pink_Floyd_DB.txt"
 
-albums = Data.parse_file(DATABASE_FILE)
+album = Album()
+albums = Album.parse_file(album, DATABASE_FILE)
 
 
-def getAlbums():
+def get_albums() -> str:
+    """
+    Function to get all the albums of Pink Floyd
+    :return:
+        return a message of all albums
+    """
     album_list = "\n".join(album['name'] for album in albums)
     return "the albums list:\n" + album_list
 
 
-def getAlbumsSongs(albumName):
+def get_albums_songs(albumName: str) -> str:
+    """
+    Function to get all songs in a given album.
+    parameters:
+        albumName (str): The name of the album to search for.
+    returns:
+        str: A message listing the songs in the album, or "-1" if the album is not found.
+      """
     msg = "The songs in the album: \n"
+    found = False
     for album in albums:
         if album['name'].lower() == albumName.lower():
+            found = True
             for song in album['songs']:
                 msg += f'{song['name']}\n'
+    if not found:
+        return "-1"
     return msg
 
 
-def getSongLength(songName):
+def get_song_length(songName: str) -> str:
+    """
+    Function to get the length of a given song
+    :param songName: the name of the song
+    :return: the duration of the given song
+    """
     msg = ""
     found = False
     for album in albums:
@@ -30,24 +58,33 @@ def getSongLength(songName):
                 msg = f'the Duration of {songName} is: {song['duration']}'
                 found = True
     if not found:
-        return "Song not found"
+        return "-1"
     return msg
 
 
-def getSongLyrics(songName):
+def get_song_lyrics(songName: str) -> str:
+    """
+    get lyrics of a given song
+    :param songName:the name of the song
+    :return: the lyrics of a song
+    """
     msg = ""
     found = False
     for album in albums:
         for song in album['songs']:
             if songName.lower() == song['name'].lower():
-                found = True
                 msg = f'{song['lyrics']}'
+                found = True
     if not found:
-        return "Song not found"
+        return "-1"
     return msg
 
 
-def get_song_albums(songName):
+def get_song_albums(songName: str) -> str:
+    """
+    get the album of a given song
+    :param songName: the name of a song
+    """
     msg = ""
     found = False
     for album in albums:
@@ -56,11 +93,16 @@ def get_song_albums(songName):
                 found = True
                 msg = f'{album['name']}'
     if not found:
-        return "Song not found"
+        return "-1"
     return msg
 
 
-def SearchSongName(word):
+def search_song_name(word: str) -> str:
+    """
+    search song name by a given word or char
+    :param word: word or char
+    :return: return the song name
+    """
     msg = ""
     found = False
     for album in albums:
@@ -69,11 +111,16 @@ def SearchSongName(word):
                 msg += f'{song['name']}\n'
                 found = True
     if not found:
-        msg = "Song not found."
+        msg = "-1"
     return msg
 
 
-def SearchSongLyrics(word):
+def search_song_lyrics(word: str) -> str:
+    """
+    search song name by a given lyric word or char
+    :param word: word or char
+    :return: return the song name
+    """
     msg = ""
     found = False
     for album in albums:
@@ -82,49 +129,61 @@ def SearchSongLyrics(word):
                 msg += f'{song['name']}\n'
                 found = True
     if not found:
-        msg = "Song not found."
+        msg = "-1"
     return msg
 
 
 command_map = {
-    '1': getAlbums,
-    '2': (getAlbumsSongs,"Enter the album Name:"),
-    '3': (getSongLength,"Enter a song Name:"),
-    '4': (getSongLyrics,"Enter a song Name:"),
-    '5': (get_song_albums,"Enter a song name:"),
-    '6': (SearchSongName,"Enter a Word:"),
-    '7': (SearchSongLyrics,"Enter a Word:"),
+    """
+    command_map for all command functions
+    """
+    '1': get_albums,
+    '2': get_albums_songs,
+    '3': get_song_length,
+    '4': get_song_lyrics,
+    '5': get_song_albums,
+    '6': search_song_name,
+    '7': search_song_lyrics,
 }
 
 
-def command_helper(socket, text: str, case: str):
-    socket.send(text.encode('utf-8'))
-    name = socket.recv(1024).decode('utf-8')
-    msg = command_map[case][0](name)
-    socket.send(msg.encode('utf-8'))
-
-
 def handle_client(communication_socket):
-    communication_socket.send("Welcome to the Pink Floyd Server".encode())
+    welcome_msg = "Welcome to the Pink Floyd Server"
+    communication_socket.send(welcome_msg.encode())
     while True:
-        command = communication_socket.recv(1024).decode()
 
-        if command == '1':
-            msg = getAlbums()
-            communication_socket.send(msg.encode())
-        elif command == '8':
-            communication_socket.send("Bye Bye!".encode())
+        packet = communication_socket.recv(1032)
+        request_code, data, error_code = PDU.read_packet(packet)
+        if request_code == 8:
             break
+        elif request_code == 1:
+            msg = get_albums()
+            pdu = PDU(0, msg, 0)
+            album_packet = pdu.write_packet()
+            communication_socket.send(album_packet)
         else:
-            command_helper(communication_socket, command_map[command][1], command)
+            msg = command_map[str(request_code)](data)
+            if msg == "-1":
+                error_code = 1
+            else:
+                error_code = 0
+            pdu = PDU(0, msg, error_code)
+            packet = pdu.write_packet()
+            communication_socket.send(packet)
     communication_socket.close()
 
+
 def initializeServerSocket():
+    """
+    Connect and listen to specific port and IP
+    :return: return the server socket
+    """
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('localhost', 12345))
+    server_socket.bind((HOST, PORT))
     print("Connected to Server")
     server_socket.listen(5)
     return server_socket
+
 
 def multi_client(socket):
     try:
